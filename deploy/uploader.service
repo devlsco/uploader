@@ -1,0 +1,46 @@
+# Install (binary):
+#   sudo useradd --system --home /var/lib/uploader --create-home uploader
+#   sudo install -d -o uploader -g uploader /opt/uploader/bin   (service-owned so "Update now" works)
+#   sudo install -m 755 -o uploader -g uploader uploader-linux-$(uname -m) /opt/uploader/bin/uploader
+#   echo "UPLOADER_URL=https://up.example.com" | sudo tee /opt/uploader/.env
+#   sudo cp deploy/uploader.service /etc/systemd/system/ && sudo systemctl enable --now uploader
+#   journalctl -u uploader   -> shows the setup link (with the one-time code) on the first start
+#   Behind a proxy on the same machine, add UPLOADER_TRUST_PROXY=true to the .env
+[Unit]
+Description=Uploader
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=uploader
+Group=uploader
+EnvironmentFile=/opt/uploader/.env
+Environment=UPLOADER_DATA=/var/lib/uploader
+WorkingDirectory=/var/lib/uploader
+ExecStart=/opt/uploader/bin/uploader serve
+Restart=always
+RestartSec=2
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+RestrictNamespaces=true
+RestrictRealtime=true
+SystemCallArchitectures=native
+MemoryDenyWriteExecute=true
+ProtectClock=true
+ProtectHostname=true
+ProtectKernelLogs=true
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+CapabilityBoundingSet=
+UMask=0077
+ReadWritePaths=/var/lib/uploader /opt/uploader/bin
+
+[Install]
+WantedBy=multi-user.target

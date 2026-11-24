@@ -1,0 +1,143 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm lint
+      - run: pnpm exec tsc --noEmit
+      - run: pnpm build
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: web
+          path: web/out
+          retention-days: 3
+
+  server:
+    needs: web
+    strategy:
+      matrix:
+        include:
+          - arch: x86_64
+            docker: amd64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            docker: arm64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: web
+          path: web/out
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+          components: clippy
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+        with:
+          key: ${{ matrix.arch }}
+      - run: cargo clippy --locked
+      - run: cargo test --locked
+      - run: cargo build --release --locked
+      - name: Package
+        run: |
+          mkdir dist
+          cp target/release/uploader dist/uploader-linux-${{ matrix.arch }}
+          cd dist && sha256sum uploader-linux-${{ matrix.arch }} | cut -d' ' -f1 > uploader-linux-${{ matrix.arch }}.sha256
+          cp uploader-linux-${{ matrix.arch }} uploader-${{ matrix.docker }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: uploader-${{ matrix.arch }}
+          path: dist
+          retention-days: 14
+
+  release:
+    needs: server
+    if: github.event_name == 'push'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: uploader-*
+          path: dist
+          merge-multiple: true
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Tags
+        id: tags
+        run: |
+          img=ghcr.io/${GITHUB_REPOSITORY,,}
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            v=${GITHUB_REF#refs/tags/v}
+            echo "tags=$img:latest,$img:$v" >> "$GITHUB_OUTPUT"
+          else
+            echo "tags=$img:edge" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: .
+          file: Dockerfile.release
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.tags.outputs.tags }}
+          provenance: false
+          sbom: false
+      - name: Sign
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          SIGNING_KEY: ${{ secrets.UPLOADER_SIGNING_KEY }}
+        run: |
+          if [ -z "$SIGNING_KEY" ]; then echo "::error::The UPLOADER_SIGNING_KEY secret is missing"; exit 1; fi
+          umask 077
+          printf '%s\n' "$SIGNING_KEY" > "$RUNNER_TEMP/key.pem"
+          openssl pkey -in "$RUNNER_TEMP/key.pem" -pubout > "$RUNNER_TEMP/pub.pem"
+          for f in dist/uploader-linux-x86_64 dist/uploader-linux-aarch64; do
+            openssl pkeyutl -sign -inkey "$RUNNER_TEMP/key.pem" -rawin -in "$f" -out "$f.sig"
+            openssl pkeyutl -verify -pubin -inkey "$RUNNER_TEMP/pub.pem" -rawin -in "$f" -sigfile "$f.sig"
+          done
+          rm -f "$RUNNER_TEMP/key.pem"
+
+      - name: GitHub release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" --generate-notes dist/uploader-linux-*

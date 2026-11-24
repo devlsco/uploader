@@ -1,0 +1,11 @@
+services:
+  uploader:
+    image: ghcr.io/devlsco/uploader:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./data:/data
+    environment:
+      # change to your domain, e.g. https://up.example.com
+      UPLOADER_URL: http://localhost:3000

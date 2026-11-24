@@ -1,0 +1,12 @@
+FROM debian:bookworm-slim
+ARG TARGETARCH
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates ffmpeg && rm -rf /var/lib/apt/lists/* \
+    && useradd --system --uid 1000 --home /data uploader && mkdir /data && chown uploader /data
+COPY dist/uploader-${TARGETARCH} /usr/local/bin/uploader
+RUN chmod 755 /usr/local/bin/uploader
+USER uploader
+ENV UPLOADER_DATA=/data UPLOADER_BIND=0.0.0.0:3000
+VOLUME /data
+EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s CMD ["uploader", "health"]
+CMD ["uploader", "serve"]

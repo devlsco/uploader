@@ -1,0 +1,46 @@
+name: Screenshots
+
+on: workflow_dispatch
+
+permissions:
+  contents: read
+
+jobs:
+  screenshots:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4
+        with:
+          package_json_file: web/package.json
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 24
+          cache: pnpm
+          cache-dependency-path: web/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile && pnpm build
+        working-directory: web
+        env:
+          NEXT_TELEMETRY_DISABLED: 1
+      - uses: dtolnay/rust-toolchain@39008827e6b4319a349e9a42dfc90579dd25f1ca # stable
+        with:
+          toolchain: stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - run: cargo build --locked
+      - name: Start
+        run: |
+          mkdir demo
+          UPLOADER_DATA=demo UPLOADER_BIND=127.0.0.1:3000 UPLOADER_URL=http://localhost:3000 ./target/debug/uploader serve > server.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf localhost:3000/health && break; sleep 1; done
+      - name: Take screenshots
+        run: |
+          npm init -y >/dev/null && npm i playwright@1.49.1 >/dev/null
+          npx playwright install --with-deps chromium >/dev/null
+          export SETUP_CODE=$(grep -o 'setup code: [A-Za-z0-9_-]*' server.log | head -1 | cut -d' ' -f3)
+          node scripts/screenshots.mjs
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: screenshots
+          path: docs
+      - if: failure()
+        run: cat server.log

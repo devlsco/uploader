@@ -1,0 +1,49 @@
+[package]
+name = "uploader"
+version = "1.2.1"
+edition = "2024"
+license = "MIT"
+description = "Fast self-hosted file, paste and link host with ShareX and Chatterino support"
+repository = "https://github.com/devlsco/uploader"
+
+[dependencies]
+anyhow = "1"
+argon2 = "0.5"
+axum = { version = "0.8", features = ["multipart", "macros"] }
+axum-extra = { version = "0.10", features = ["cookie"] }
+base64 = "0.22"
+bytes = "1"
+clap = { version = "4", features = ["derive", "env"] }
+dotenvy = "0.15"
+futures-util = "0.3"
+hex = "0.4"
+hmac = "0.12"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "gif", "webp", "bmp", "ico", "tiff"] }
+img-parts = "0.3"
+infer = "0.16"
+libc = "0.2"
+mime_guess = "2"
+percent-encoding = "2"
+rand = "0.8"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+ring = "0.17"
+rusqlite = { version = "0.32", features = ["bundled"] }
+rust-embed = "8"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+time = { version = "0.3", features = ["formatting"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "fs", "io-util", "net", "signal", "sync", "time", "process"] }
+tokio-util = { version = "0.7", features = ["io"] }
+tower = { version = "0.5", features = ["util"] }
+tower-http = { version = "0.6", features = ["fs", "compression-gzip", "compression-br", "trace"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+
+[profile.release]
+lto = "fat"
+codegen-units = 1
+strip = true
+
+[profile.dev.package."*"]
+opt-level = 1
